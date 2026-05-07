@@ -1,3 +1,621 @@
+
+\documentclass[UTF8,zihao=-4]{ctexart}
+
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs,array,longtable}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!55!black,
+    urlcolor=blue!55!black,
+    citecolor=blue!55!black
+}
+
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{codeframe}{RGB}{210,210,210}
+\definecolor{codekw}{RGB}{0,92,175}
+\definecolor{codestr}{RGB}{143,65,14}
+\definecolor{codecomment}{RGB}{86,128,86}
+
+\lstdefinestyle{pycodestyle}{
+    language=Python,
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{codekw}\bfseries,
+    stringstyle=\color{codestr},
+    commentstyle=\color{codecomment}\itshape,
+    backgroundcolor=\color{codebg},
+    frame=single,
+    rulecolor=\color{codeframe},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=8pt,
+    tabsize=4,
+    showstringspaces=false,
+    breaklines=true,
+    breakatwhitespace=false,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+\lstdefinestyle{outstyle}{
+    basicstyle=\ttfamily\scriptsize,
+    backgroundcolor=\color{codebg},
+    frame=single,
+    rulecolor=\color{codeframe},
+    numbers=none,
+    tabsize=4,
+    showstringspaces=false,
+    breaklines=true,
+    columns=fullflexible,
+    keepspaces=true
+}
+
+\setlist[itemize]{topsep=2pt,itemsep=2pt,parsep=0pt}
+\setlist[enumerate]{topsep=2pt,itemsep=2pt,parsep=0pt}
+\renewcommand{\arraystretch}{1.18}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{实验报告}
+\rhead{\url{https://github.com/JinShuo-Li/Matrix-Library}}
+\cfoot{\thepage}
+
+\title{\vspace{-1.2cm}\textbf{矩阵阶梯形与 QR 分解实验技术报告}\\[0.4em]
+\large 基于 \texttt{main.py} 与 \texttt{matlibrary.py} 的实现与验证}
+\author{ }
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\begin{abstract}
+本报告围绕三个线性代数程序实验展开：随机生成 $10\times 8$ 整数矩阵并化为行阶梯形矩阵；使用 Householder 变换实现指定矩阵的 QR 分解；使用 Givens 旋转实现指定矩阵的 QR 分解。程序主体由 \texttt{main.py} 调度，核心矩阵类与算法由 \texttt{matlibrary.py} 提供。报告分为三个小节，每个小节均包含问题及算法描述、程序验证结果、反思总结。附录中给出 \texttt{main.py} 与 \texttt{matlibrary.py} 的完整代码。
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{实验背景与程序结构}
+
+本实验的目标是用程序实现常见矩阵分解与矩阵化简算法，并用数值残差、正交性误差以及第三方库结果进行验证。\texttt{matlibrary.py} 以一个统一的 \texttt{Matrix} 类作为核心，支持 \texttt{fraction} 与 \texttt{float} 两种数值模式，并实现了高斯消元、矩阵乘法、转置、秩、QR 分解等方法。\texttt{main.py} 负责构造三个实验矩阵、调用算法接口、打印分解结果并用 SymPy 进行对照验证。
+
+\begin{table}[H]
+\centering
+\caption{程序文件职责}
+\begin{tabular}{p{0.25\linewidth}p{0.65\linewidth}}
+\toprule
+文件 & 职责说明 \\
+\midrule
+\texttt{main.py} & 生成实验输入矩阵，分别调用高斯消元、Householder QR 与 Givens QR，并输出验证指标。\\
+\texttt{matlibrary.py} & 定义 \texttt{Matrix} 类，实现矩阵存储、基础运算、高斯消元、QR 分解及相关辅助函数。\\
+\texttt{README.md / README\_cn.md / README\_en.md} & 说明项目定位、接口列表、算法适用范围与使用示例。\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+程序中使用的主要误差指标如下。若 $A=QR$ 为 QR 分解，则重构误差为
+\[
+    e_{\mathrm{res}}=\|A-QR\|_F,
+\]
+正交性误差为
+\[
+    e_{\mathrm{orth}}=\|Q^TQ-I\|_F.
+\]
+当两个误差均接近机器精度时，可以认为程序分解结果在数值意义上是正确的。
+
+\section{任务一：随机矩阵的行阶梯形化}
+
+\subsection{问题及算法描述}
+
+任务要求随机生成一个 $10\times 8$ 阶整数矩阵，并将其化为阶梯形矩阵。本程序使用 \texttt{random.Random(0)} 固定随机种子，从而保证实验可重复。矩阵元素由区间 $[-9,9]$ 内的整数随机生成。
+
+本任务采用带部分主元选取的高斯消元算法。设当前主元位于第 $r$ 行、第 $c$ 列，算法先在第 $r$ 行及其下方寻找绝对值最大的非零元素作为主元，以减少除以过小数值带来的误差；随后对下方各行进行
+\[
+    R_i \leftarrow R_i-\frac{a_{ic}}{a_{rc}}R_r,\qquad i=r+1,\ldots,m.
+\]
+当当前列无法找到非零主元时跳过该列。最终得到上阶梯形矩阵，并记录行交换次数。
+
+\subsection{程序验证结果}
+
+随机生成的矩阵为
+\[
+A=\begin{bmatrix}
+3&4&-8&-1&7&6&3&0\\
+6&2&9&-3&7&-5&0&-5\\
+-6&-1&8&-5&0&-6&-7&1\\
+6&8&-6&2&4&1&-3&8\\
+6&5&7&-1&-8&8&-9&-7\\
+3&-9&6&1&-2&1&-7&-3\\
+9&-2&-2&-5&8&5&-7&-7\\
+1&7&6&-6&0&8&0&-6\\
+8&1&8&-3&8&9&0&5\\
+-7&3&1&9&-2&0&-4&-3
+\end{bmatrix}.
+\]
+
+带主元高斯消元输出的行阶梯形矩阵为
+\[
+\scriptsize
+\operatorname{REF}(A)=\begin{bmatrix}
+9.0000&-2.0000&-2.0000&-5.0000&8.0000&5.0000&-7.0000&-7.0000\\
+0&9.3333&-4.6667&5.3333&-1.3333&-2.3333&1.6667&12.6667\\
+0&0&12.0000&-1.5714&2.1429&-7.5000&4.0714&-4.8571\\
+0&0&0&-8.2837&-1.6131&15.3958&-3.8482&-11.0437\\
+0&0&0&0&-14.5250&13.8468&-9.4684&-6.5674\\
+0&0&0&0&0&15.7538&-14.0806&-17.6896\\
+0&0&0&0&0&0&-19.4138&0.4436\\
+0&0&0&0&0&0&0&26.4275\\
+0&0&0&0&0&0&0&0\\
+0&0&0&0&0&0&0&0
+\end{bmatrix}.
+\]
+
+验证结果如下：
+\begin{table}[H]
+\centering
+\caption{任务一验证结果}
+\begin{tabular}{lc}
+\toprule
+项目 & 结果 \\
+\midrule
+行交换次数 & 7 \\
+程序计算秩 & 8 \\
+SymPy 对照秩 & 8 \\
+结论 & 阶梯形结果与秩验证一致 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{反思总结}
+
+本任务中，带部分主元的高斯消元比直接消元更稳健，尤其是在随机矩阵中可能出现较小主元时，主元选取可以减少数值误差。由于矩阵为 $10\times 8$，最大秩不超过 8，本次程序与 SymPy 均得到秩 8，说明该随机矩阵为列满秩。需要注意的是，不同软件或不同主元策略得到的阶梯形矩阵并不唯一，因此验证时不应只比较每个元素是否完全相同，而应重点比较秩、零结构以及是否可由初等行变换得到。
+
+\section{任务二：Householder 变换 QR 分解}
+
+\subsection{问题及算法描述}
+
+任务要求对矩阵
+\[
+A=\begin{bmatrix}
+3&14&9\\
+6&43&3\\
+6&22&15
+\end{bmatrix}
+\]
+进行 QR 分解，即求正交矩阵 $Q$ 和上三角矩阵 $R$，使得
+\[
+    A=QR,\qquad Q^TQ=I.
+\]
+
+Householder 变换的核心思想是用反射矩阵逐列消去主元下方元素。对当前列向量 $x$，构造单位向量
+\[
+    v=\frac{x+\operatorname{sign}(x_1)\|x\|_2e_1}{\left\|x+\operatorname{sign}(x_1)\|x\|_2e_1\right\|_2},
+\]
+再构造反射矩阵
+\[
+    H=I-2vv^T.
+\]
+不断将 $H$ 作用于当前子矩阵，即可把矩阵化为上三角矩阵 $R$；所有反射矩阵的累积给出正交矩阵 $Q$。
+
+\subsection{程序验证结果}
+
+程序使用 \texttt{A2.qr\_decomposition(method="householder")} 得到
+\[
+Q=\begin{bmatrix}
+-0.3333&0.1333&0.9333\\
+-0.6667&-0.7333&-0.1333\\
+-0.6667&0.6667&-0.3333
+\end{bmatrix},
+\qquad
+R=\begin{bmatrix}
+-9.0000&-48.0000&-15.0000\\
+0&-15.0000&9.0000\\
+0&0&3.0000
+\end{bmatrix}.
+\]
+
+验证误差为
+\begin{table}[H]
+\centering
+\caption{任务二验证结果}
+\begin{tabular}{lc}
+\toprule
+项目 & 数值 \\
+\midrule
+重构误差 $\|A-QR\|_F$ & $9.503924\times 10^{-15}$ \\
+正交性误差 $\|Q^TQ-I\|_F$ & $4.191000\times 10^{-16}$ \\
+SymPy 重构误差 & $0.000000\times 10^{0}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+可以看到，重构误差和正交性误差均接近浮点机器精度，说明 Householder QR 分解结果正确。SymPy 输出的 $Q$ 和 $R$ 与本程序存在若干列符号差异，这是 QR 分解中常见的非唯一性：若同时改变 $Q$ 的某一列与 $R$ 的对应行符号，乘积 $QR$ 不变。
+
+\subsection{反思总结}
+
+Householder 方法通过正交反射实现消元，理论上不会放大向量范数，因此通常比经典 Gram-Schmidt 方法具有更好的数值稳定性。本次结果中，$R$ 的下三角元素被成功消为零，且 $Q$ 的正交性误差在 $10^{-16}$ 量级，体现了该方法在小规模稠密矩阵 QR 分解中的可靠性。
+
+\section{任务三：Givens 旋转 QR 分解}
+
+\subsection{问题及算法描述}
+
+任务要求对矩阵
+\[
+A=\begin{bmatrix}
+2&2&1\\
+0&2&2\\
+2&1&2
+\end{bmatrix}
+\]
+使用 Givens 变换进行 QR 分解。
+
+Givens 旋转通过二维平面旋转逐个消去指定元素。若希望消去向量 $[a,b]^T$ 中的 $b$，令
+\[
+    r=\sqrt{a^2+b^2},\qquad c=\frac{a}{r},\qquad s=\frac{b}{r},
+\]
+则
+\[
+\begin{bmatrix}
+c&s\\
+-s&c
+\end{bmatrix}
+\begin{bmatrix}
+a\\b
+\end{bmatrix}
+=
+\begin{bmatrix}
+r\\0
+\end{bmatrix}.
+\]
+对矩阵的每一列从下往上依次构造旋转，即可得到上三角矩阵 $R$；旋转矩阵的累积转置对应正交因子 $Q$。
+
+\subsection{程序验证结果}
+
+程序使用 \texttt{A3.qr\_decomposition(method="givens")} 得到
+\[
+Q=\begin{bmatrix}
+0.7071&0.2357&-0.6667\\
+0&0.9428&0.3333\\
+0.7071&-0.2357&0.6667
+\end{bmatrix},
+\qquad
+R=\begin{bmatrix}
+2.8284&2.1213&2.1213\\
+0&2.1213&1.6499\\
+0&0&1.3333
+\end{bmatrix}.
+\]
+
+验证误差为
+\begin{table}[H]
+\centering
+\caption{任务三验证结果}
+\begin{tabular}{lc}
+\toprule
+项目 & 数值 \\
+\midrule
+重构误差 $\|A-QR\|_F$ & $8.881784\times 10^{-16}$ \\
+正交性误差 $\|Q^TQ-I\|_F$ & $3.510833\times 10^{-16}$ \\
+SymPy 重构误差 & $0.000000\times 10^{0}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+程序输出与 SymPy 的 QR 分解结果在四位小数显示下完全一致，且两个误差均处于 $10^{-16}$ 量级，说明 Givens 旋转实现正确。
+
+\subsection{反思总结}
+
+Givens 旋转的优点是可以针对单个元素进行局部消元，特别适合稀疏矩阵或只需改变局部结构的情形。相比 Householder 反射，Givens 方法在稠密小矩阵上可能步骤更多，但过程直观，且便于观察每次旋转如何把某个下三角元素消为零。本次任务中，Givens 分解结果的残差和正交性误差都非常小，说明旋转矩阵的累积方向与 $A=QR$ 的约定保持一致。
+
+\section{完整运行输出摘要}
+
+下面给出本地运行 \texttt{python main.py} 后的输出摘要，作为报告中数值结果的来源。为了避免任务一的 SymPy 阶梯形巨大整数输出影响正文阅读，正文表格只摘录关键验证指标；完整程序仍保留在附录中。
+
+\begin{lstlisting}[style=outstyle,caption={main.py 运行输出}]
+============================================================
+Task 1
+Original matrix A (10x8):
+[    3.0000     4.0000    -8.0000    -1.0000     7.0000     6.0000     3.0000     0.0000]
+[    6.0000     2.0000     9.0000    -3.0000     7.0000    -5.0000     0.0000    -5.0000]
+[   -6.0000    -1.0000     8.0000    -5.0000     0.0000    -6.0000    -7.0000     1.0000]
+[    6.0000     8.0000    -6.0000     2.0000     4.0000     1.0000    -3.0000     8.0000]
+[    6.0000     5.0000     7.0000    -1.0000    -8.0000     8.0000    -9.0000    -7.0000]
+[    3.0000    -9.0000     6.0000     1.0000    -2.0000     1.0000    -7.0000    -3.0000]
+[    9.0000    -2.0000    -2.0000    -5.0000     8.0000     5.0000    -7.0000    -7.0000]
+[    1.0000     7.0000     6.0000    -6.0000     0.0000     8.0000     0.0000    -6.0000]
+[    8.0000     1.0000     8.0000    -3.0000     8.0000     9.0000     0.0000     5.0000]
+[   -7.0000     3.0000     1.0000     9.0000    -2.0000     0.0000    -4.0000    -3.0000]
+
+Row echelon form (pivoting=True):
+[    9.0000    -2.0000    -2.0000    -5.0000     8.0000     5.0000    -7.0000    -7.0000]
+[    0.0000     9.3333    -4.6667     5.3333    -1.3333    -2.3333     1.6667    12.6667]
+[    0.0000     0.0000    12.0000    -1.5714     2.1429    -7.5000     4.0714    -4.8571]
+[    0.0000     0.0000     0.0000    -8.2837    -1.6131    15.3958    -3.8482   -11.0437]
+[    0.0000     0.0000     0.0000     0.0000   -14.5250    13.8468    -9.4684    -6.5674]
+[    0.0000     0.0000     0.0000     0.0000     0.0000    15.7538   -14.0806   -17.6896]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000   -19.4138     0.4436]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000    26.4275]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000]
+Number of row swaps: 7
+
+Sympy row echelon form (for comparison):
+[    3.0000     4.0000    -8.0000    -1.0000     7.0000     6.0000     3.0000     0.0000]
+[    0.0000   -18.0000    75.0000    -3.0000   -21.0000   -51.0000   -18.0000   -15.0000]
+[    0.0000     0.0000 -1143.0000   441.0000  -315.0000   747.0000   432.0000   261.0000]
+[    0.0000     0.0000     0.0000 -26946.0000 43740.0000 15309.0000 17901.0000 -35262.0000]
+[    0.0000     0.0000     0.0000     0.0000 20594532852.0000 -24142498578.0000 7224251490.0000 15578385912.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000 75704789307487076352.0000 661159964141656211456.0000 -491984122824002437120.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000 -289030607397892380998011835018158509391872.0000 202551688926808393849939867039847604551680.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000 4273198931115131210559830051849668927089950811296118708336065493720277125240455168.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000]
+[    0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000     0.0000]
+Our rank: 8, Sympy rank: 8
+
+============================================================
+Task 2
+Matrix A:
+[    3.0000    14.0000     9.0000]
+[    6.0000    43.0000     3.0000]
+[    6.0000    22.0000    15.0000]
+
+Householder Q:
+[   -0.3333     0.1333     0.9333]
+[   -0.6667    -0.7333    -0.1333]
+[   -0.6667     0.6667    -0.3333]
+
+Householder R:
+[   -9.0000   -48.0000   -15.0000]
+[    0.0000   -15.0000     9.0000]
+[    0.0000     0.0000     3.0000]
+
+Householder: residual=9.503924e-15, orthogonality=4.191000e-16
+
+Sympy Q:
+[      0.3333      -0.1333       0.9333]
+[      0.6667       0.7333      -0.1333]
+[      0.6667      -0.6667      -0.3333]
+Sympy R:
+[      9.0000      48.0000      15.0000]
+[      0.0000      15.0000      -9.0000]
+[      0.0000       0.0000       3.0000]
+Sympy QR:    residual=0.000000e+00
+
+============================================================
+Task 3
+Matrix A:
+[    2.0000     2.0000     1.0000]
+[    0.0000     2.0000     2.0000]
+[    2.0000     1.0000     2.0000]
+
+Givens Q:
+[    0.7071     0.2357    -0.6667]
+[    0.0000     0.9428     0.3333]
+[    0.7071    -0.2357     0.6667]
+
+Givens R:
+[    2.8284     2.1213     2.1213]
+[    0.0000     2.1213     1.6499]
+[    0.0000     0.0000     1.3333]
+
+Givens:      residual=8.881784e-16, orthogonality=3.510833e-16
+
+Sympy Q:
+[      0.7071       0.2357      -0.6667]
+[      0.0000       0.9428       0.3333]
+[      0.7071      -0.2357       0.6667]
+Sympy R:
+[      2.8284       2.1213       2.1213]
+[      0.0000       2.1213       1.6499]
+[      0.0000       0.0000       1.3333]
+Sympy QR:    residual=0.000000e+00
+
+
+\end{lstlisting}
+
+\appendix
+\section{\texttt{main.py} 完整源码}
+
+\begin{lstlisting}[style=pycodestyle,caption={main.py 完整源码}]
+import math
+import random
+
+try:
+    import sympy as sp
+except ImportError:
+    sp = None
+
+from matlibrary import Matrix
+
+
+def _frob_norm(data):
+    total = 0.0
+    for row in data:
+        for val in row:
+            total += val * val
+    return math.sqrt(total)
+
+
+def _diff_frob(a, b):
+    if not a:
+        return 0.0
+    total = 0.0
+    rows = len(a)
+    cols = len(a[0])
+    for i in range(rows):
+        for j in range(cols):
+            diff = a[i][j] - b[i][j]
+            total += diff * diff
+    return math.sqrt(total)
+
+
+def _residual_error(A, Q, R):
+    A_data = A.to_float_data()
+    QR_data = (Q * R).to_float_data()
+    return _diff_frob(A_data, QR_data)
+
+
+def _orthogonality_error(Q):
+    m, _ = Q.dim
+    QtQ = Q.transpose() * Q
+    I = Matrix.identity(m, tolerance=Q.tolerance, dtype="float")
+    return _diff_frob(QtQ.to_float_data(), I.to_float_data())
+
+
+def _sympy_qr(data):
+    if sp is None:
+        print("sympy is not installed. Install with: pip install sympy")
+        return None
+    A_sym = sp.Matrix(data)
+    Q_sym, R_sym = A_sym.QRdecomposition()
+    return A_sym, Q_sym, R_sym
+
+
+def _sympy_echelon(data):
+    """Return sympy row echelon form (not reduced) of a matrix."""
+    if sp is None:
+        return None
+    A_sym = sp.Matrix(data)
+    return A_sym.echelon_form()
+
+
+def _format_matrix(data, precision=6, width=12):
+    if not data:
+        return "[]"
+    lines = []
+    for row in data:
+        parts = [f"{val:>{width}.{precision}f}" for val in row]
+        lines.append("[" + " ".join(parts) + "]")
+    return "\n".join(lines)
+
+
+def _sympy_to_float_list(sympy_mat):
+    rows, cols = sympy_mat.shape
+    return [[float(sympy_mat[i, j]) for j in range(cols)] for i in range(rows)]
+
+
+def main():
+    print("=" * 60)
+    print("Task 1")
+
+    rng = random.Random(0)
+    rows, cols = 10, 8
+    data = [[rng.randint(-9, 9) for _ in range(cols)] for _ in range(rows)]
+    A = Matrix(data, tolerance=1e-10, dtype="float")
+
+    print("Original matrix A (10x8):")
+    print(A)
+    print()
+
+    ref, swaps = A.gauss_elimination(pivoting=True)
+    print("Row echelon form (pivoting=True):")
+    print(ref)
+    print(f"Number of row swaps: {swaps}")
+    print()
+
+    if sp is not None:
+        sympy_ech = _sympy_echelon(data)
+        if sympy_ech is not None:
+            print("Sympy row echelon form (for comparison):")
+            print(_format_matrix(_sympy_to_float_list(sympy_ech), precision=4, width=10))
+            our_rank = ref.rank()
+            sympy_rank = sympy_ech.rank()
+            print(f"Our rank: {our_rank}, Sympy rank: {sympy_rank}")
+    else:
+        print("sympy not available for verification.")
+    print()
+
+    print("=" * 60)
+    print("Task 2")
+
+    A2_data = [[3, 14, 9],
+               [6, 43, 3],
+               [6, 22, 15]]
+    A2 = Matrix(A2_data, tolerance=1e-10, dtype="float")
+    Q2_h, R2_h = A2.qr_decomposition(method="householder")
+
+    print("Matrix A:")
+    print(A2)
+    print()
+    print("Householder Q:")
+    print(Q2_h)
+    print()
+    print("Householder R:")
+    print(R2_h)
+    print()
+
+    err_h = _residual_error(A2, Q2_h, R2_h)
+    orth_h = _orthogonality_error(Q2_h)
+    print(f"Householder: residual={err_h:.6e}, orthogonality={orth_h:.6e}")
+    print()
+
+    sympy_result2 = _sympy_qr(A2_data)
+    if sympy_result2 is not None:
+        A2_sym, Q2_sym, R2_sym = sympy_result2
+        diff = A2_sym - Q2_sym * R2_sym
+        err_sym = math.sqrt(sum(float(x) * float(x) for x in diff))
+        print("Sympy Q:")
+        print(_format_matrix(_sympy_to_float_list(Q2_sym), precision=4, width=12))
+        print("Sympy R:")
+        print(_format_matrix(_sympy_to_float_list(R2_sym), precision=4, width=12))
+        print(f"Sympy QR:    residual={err_sym:.6e}")
+    print()
+
+    print("=" * 60)
+    print("Task 3")
+
+    A3_data = [[2, 2, 1],
+               [0, 2, 2],
+               [2, 1, 2]]
+    A3 = Matrix(A3_data, tolerance=1e-10, dtype="float")
+    Q3_g, R3_g = A3.qr_decomposition(method="givens")
+
+    print("Matrix A:")
+    print(A3)
+    print()
+    print("Givens Q:")
+    print(Q3_g)
+    print()
+    print("Givens R:")
+    print(R3_g)
+    print()
+
+    err_g = _residual_error(A3, Q3_g, R3_g)
+    orth_g = _orthogonality_error(Q3_g)
+    print(f"Givens:      residual={err_g:.6e}, orthogonality={orth_g:.6e}")
+    print()
+
+    # sympy 验证
+    sympy_result3 = _sympy_qr(A3_data)
+    if sympy_result3 is not None:
+        A3_sym, Q3_sym, R3_sym = sympy_result3
+        diff = A3_sym - Q3_sym * R3_sym
+        err_sym = math.sqrt(sum(float(x) * float(x) for x in diff))
+        print("Sympy Q:")
+        print(_format_matrix(_sympy_to_float_list(Q3_sym), precision=4, width=12))
+        print("Sympy R:")
+        print(_format_matrix(_sympy_to_float_list(R3_sym), precision=4, width=12))
+        print(f"Sympy QR:    residual={err_sym:.6e}")
+    print()
+
+
+if __name__ == "__main__":
+    main()
+\end{lstlisting}
+
+\section{\texttt{matlibrary.py} 完整源码}
+
+\begin{lstlisting}[style=pycodestyle,caption={matlibrary.py 完整源码}]
 import copy
 import math
 from fractions import Fraction
@@ -1147,3 +1765,21 @@ def main():
 
 if __name__ == "__main__":
     main()
+\end{lstlisting}
+
+\section*{说明}
+
+本技术报告的书写, 排版由 ChatGPT 辅助完成；报告中所分析和列出的程序代码全部为人工书写。本人在使用辅助工具时，对算法描述、数值结果、代码内容和最终表述进行了检查与修改。
+
+同时, 为了避免不必要的麻烦, 我必须说明: 本技术报告中的代码并非单纯是本课程的产物。这一代码最早可以追溯到上学期的课程MATH1205的课程大作业, 以及CS1602的课程大作业。在此之外, 随着本课程的进行我对代码进行了多次重构和改进, 以适应本课程的要求和内容。因此, 这一代码的历史较为复杂, 包含了多个阶段的开发和优化。但无论如何, 这一代码在本课程中得到了充分的使用和展示, 是我在本课程学习过程中重要的成果之一。
+
+最后的最后, 我还想说明一点, 尽管使用sympy, numpy等成熟科学计算库无疑是更明智的选择, 但是我如今选择从零开始写一整个关于矩阵的库无疑给我带来了更大的提升。感谢本课程让我对线性代数的理解更深入。感谢蒋老师的授课, 感谢助教老师的辛勤付出。
+
+本项目的更多资料, 包括原始文件, 最初实现, 以及README等, 可以在我的GitHub仓库中找到: \url{https://github.com/JinShuo-Li/Matrix-Library}.
+
+\begin{flushright}
+    2026年5月7日 \\
+    李谨硕 \\
+\end{flushright}
+
+\end{document}
